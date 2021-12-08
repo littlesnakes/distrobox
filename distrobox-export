@@ -8,10 +8,14 @@
 trap '[ "$?" -ne 0 ] && echo An error occurred' EXIT
 
 # Defaults
+<<<<<<< HEAD
 container_app=""
 container_service=""
 extra_flags=""
 container_app_delete=0
+=======
+container_export_delete=0
+>>>>>>> e14173a (Add direct export of binary #11)
 verbose=0
 version="distrobox_version_placeholder"
 
@@ -35,11 +39,14 @@ show_help() {
 
 	distrobox-export --app mpv
 	distrobox-export --service syncthing
+	distrobox-export --bin /path/to/bin --export-path ~/.local/bin
 
 	Note you can use --app OR --service but not together.
 
 	Arguments:
 		--app/-a:		name of the application to export
+		--bin/-b:		name of the application to export
+		--export-path/-ep:	name of the application to export
 		--service/-s:		name of the service to export
 		--delete/-d:		delete exported application or service
 		--help/-h:		show this message
@@ -47,6 +54,25 @@ show_help() {
 		--verbose/-v:			show more verbosity
 		--version/-V:			show version
 	"
+}
+
+# Print generated script from template
+# Arguments:
+#	distrobox name
+#	binary path
+# Outputs:
+#   print generated script.
+generate_script() {
+	distrobox_name=$1
+	binary_path=$2
+	echo "#!/bin/sh
+# distrobox_binary
+# name: ${distrobox_name}
+if [ ! -f /run/.containerenv ]; then
+    distrobox-enter --name ${distrobox_name} -e ${binary_path} \$@
+else
+    ${binary_path} \$@
+fi"
 }
 
 # Parse arguments
@@ -72,6 +98,20 @@ while :; do
 			shift
 		fi
 		;;
+	-b | --bin)
+		if [ -n "$2" ]; then
+			container_bin="$2"
+			shift
+			shift
+		fi
+		;;
+	-ep | --export-path)
+		if [ -n "$2" ]; then
+			dest_path="$2"
+			shift
+			shift
+		fi
+		;;
 	-s | --service)
 		if [ -n "$2" ]; then
 			container_service="$2"
@@ -87,7 +127,7 @@ while :; do
 		fi
 		;;
 	-d | --delete)
-		container_app_delete=1
+		container_export_delete=1
 		shift
 		;;
 	*) # Default case: If no more options then break out of the loop.
@@ -96,12 +136,22 @@ while :; do
 done
 # Ensure the foundamental variables are set and not empty, we will not proceed if
 # they are not all set.
-if [ -z "${container_app}" ] && [ -z "${container_service}" ]; then
-	echo "Invalid arguments, missing app or service to export"
+if [ -z "${container_app}" ] &&
+	[ -z "${container_bin}" ] &&
+	[ -z "${container_service}" ]; then
+	echo "Invalid arguments, choose an action below"
+	show_help
 	exit 1
 fi
-if [ -n "${container_app}" ] && [ -n "${container_service}" ]; then
-	echo "Invalid arguments, choose an app OR a service to export"
+if [ -n "${container_app}" ] &&
+	[ -n "${container_bin}" ] &&
+	[ -n "${container_service}" ]; then
+	echo "Invalid arguments, choose only one action below"
+	show_help
+	exit 1
+fi
+if [ -n "${container_bin}" ] && [ -z "${dest_path}" ]; then
+	echo "Missing argument export-path"
 	exit 1
 fi
 
@@ -122,8 +172,38 @@ container_name=$(grep "name=" /run/.containerenv | cut -d'"' -f2)
 # Prefix to add to an existing command to work throught the container
 container_command_prefix="${DISTROBOX_ENTER_PATH:-"distrobox-enter"} --name ${container_name} -e "
 
-# Work on a desktop app export
-if [ -n "${container_app}" ]; then
+if [ -n "${container_bin}" ]; then
+	# Work on a binary export
+
+	# Ensure the binary we're exporting is installed
+	if [ ! -f "${container_bin}" ]; then
+		echo "Error: cannot find ${container_bin}"
+		exit 127
+	fi
+	# generate dest_file path
+	dest_file="${dest_path}/$(basename "${container_bin}")"
+
+	# If we're deleting it, just do it and exit
+	if [ "${container_export_delete}" -ne 0 ] && grep -q "distrobox_binary" "${dest_file}"; then
+		rm -f "${dest_file}"
+		exit 0
+	fi
+
+	# test if we have writing rights on the file
+	if ! touch "${dest_file}"; then
+		echo "Error: cannot create destination file ${dest_file}"
+		exit 1
+	fi
+
+	# create the script from template and write to file
+	generate_script "${container_name}" "${container_bin}" >"${dest_file}"
+	chmod +x "${dest_file}"
+
+	exit 0
+
+elif [ -n "${container_app}" ]; then
+	# Work on a desktop app export
+
 	# Ensure the app we're exporting is installed
 	if ! command -v "${container_app}" >/dev/null; then
 		echo "Error: trying to export a non-installed application"
@@ -138,7 +218,7 @@ if [ -n "${container_app}" ]; then
 		icon_home_folder="$(dirname "${icon}" | sed "s|/usr/share/|${HOME}/.local/share/|g")"
 
 		# check if we're exporting or deleting
-		if [ "${container_app_delete}" -ne 0 ]; then
+		if [ "${container_export_delete}" -ne 0 ]; then
 			# we need to remove, not export
 			rm -f "${icon_home_folder}"/"$(basename "${icon}")"
 		else
@@ -153,7 +233,7 @@ if [ -n "${container_app}" ]; then
 		desktop_home_file="$(basename "${desktop_file}")"
 
 		# check if we're exporting or deleting
-		if [ "${container_app_delete}" -ne 0 ]; then
+		if [ "${container_export_delete}" -ne 0 ]; then
 			rm -f "${HOME}/.local/share/applications/${desktop_home_file}"
 		else
 			# If a TryExec is present, we have to fake it as it will not work throught the
@@ -164,16 +244,31 @@ if [ -n "${container_app}" ]; then
 					>"${HOME}/.local/share/applications/${desktop_home_file}"
 		fi
 	done
+
+	exit 0
+
 elif [ -n "${container_service}" ]; then
+	# Work on a service export
+
 	# If we're managing services, let's be sure we have systemctl
 	if ! command -v systemctl >/dev/null; then
 		echo "Missing dependency: systemd"
 		exit 127
 	fi
+
 	# Ensure we're working with fresh data
 	systemctl --user daemon-reload
+
 	# Fetch original service file
 	service_file="${HOME}/.config/systemd/user/${container_service}.service"
+
+	# If we're deleting it, just do it and exit
+	if [ "${container_export_delete}" -ne 0 ]; then
+		rm -f "${HOME}/.config/systemd/user/${container_service}.service"
+		systemctl --user daemon-reload
+		exit 0
+	fi
+
 	# Create temp file with random name
 	temp_file="/tmp/$(
 		tr -dc A-Za-z0-9 </dev/urandom | head -c 13
@@ -194,4 +289,6 @@ elif [ -n "${container_service}" ]; then
 	rm -f "${temp_file}"
 	# Reload
 	systemctl --user daemon-reload
+
+	exit 0
 fi

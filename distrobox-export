@@ -8,14 +8,11 @@
 trap '[ "$?" -ne 0 ] && echo An error occurred' EXIT
 
 # Defaults
-<<<<<<< HEAD
 container_app=""
 container_service=""
 extra_flags=""
 container_app_delete=0
-=======
 container_export_delete=0
->>>>>>> e14173a (Add direct export of binary #11)
 verbose=0
 version="distrobox_version_placeholder"
 
@@ -69,7 +66,7 @@ generate_script() {
 # distrobox_binary
 # name: ${distrobox_name}
 if [ ! -f /run/.containerenv ]; then
-    distrobox-enter --name ${distrobox_name} -e ${binary_path} \$@
+    distrobox-enter --name ${distrobox_name} -e ${binary_path} ${extra_flags} \$@
 else
     ${binary_path} \$@
 fi"

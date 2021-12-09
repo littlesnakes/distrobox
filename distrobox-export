@@ -9,10 +9,9 @@ trap '[ "$?" -ne 0 ] && echo An error occurred' EXIT
 
 # Defaults
 container_app=""
+container_export_delete=0
 container_service=""
 extra_flags=""
-container_app_delete=0
-container_export_delete=0
 verbose=0
 version="distrobox_version_placeholder"
 
@@ -38,16 +37,16 @@ show_help() {
 	distrobox-export --service syncthing
 	distrobox-export --bin /path/to/bin --export-path ~/.local/bin
 
-	Note you can use --app OR --service but not together.
+	Note you can use --app OR --service OR --bin but not together.
 
 	Arguments:
 		--app/-a:		name of the application to export
 		--bin/-b:		name of the application to export
-		--export-path/-ep:	name of the application to export
 		--service/-s:		name of the service to export
 		--delete/-d:		delete exported application or service
-		--help/-h:		show this message
+		--export-path/-ep:	name of the application to export
 		--extra-flags/-ef:		extra flags to add to the command
+		--help/-h:		show this message
 		--verbose/-v:			show more verbosity
 		--version/-V:			show version
 	"
@@ -102,16 +101,20 @@ while :; do
 			shift
 		fi
 		;;
-	-ep | --export-path)
+	-s | --service)
 		if [ -n "$2" ]; then
-			dest_path="$2"
+			container_service="$2"
 			shift
 			shift
 		fi
 		;;
-	-s | --service)
+	-d | --delete)
+		container_export_delete=1
+		shift
+		;;
+	-ep | --export-path)
 		if [ -n "$2" ]; then
-			container_service="$2"
+			dest_path="$2"
 			shift
 			shift
 		fi
@@ -122,10 +125,6 @@ while :; do
 			shift
 			shift
 		fi
-		;;
-	-d | --delete)
-		container_export_delete=1
-		shift
 		;;
 	*) # Default case: If no more options then break out of the loop.
 		break ;;
